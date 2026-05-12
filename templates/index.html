@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Agent Cost Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #272822;
+      color: #f8f8f2;
+      font-family: "Fira Mono", "Consolas", "Courier New", monospace;
+      min-height: 100vh;
+    }
+    header {
+      background: #1e1f1c;
+      border-bottom: 2px solid #a6e22e;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.25rem; color: #a6e22e; letter-spacing: 0.04em; }
+    header span { color: #75715e; font-size: 0.85rem; margin-left: auto; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .card {
+      background: #1e1f1c;
+      border: 1px solid #3e3d32;
+      border-radius: 6px;
+      padding: 20px 24px;
+    }
+    .card .label { color: #75715e; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .card .value { font-size: 1.6rem; color: #66d9e8; font-weight: bold; }
+    .card.alert .value { color: #f92672; }
+    .notice {
+      background: #1e1f1c;
+      border: 1px solid #e6db74;
+      border-radius: 6px;
+      padding: 12px 20px;
+      margin-bottom: 28px;
+      color: #e6db74;
+      font-size: 0.85rem;
+    }
+    .notice a { color: #a6e22e; }
+    section { margin-bottom: 36px; }
+    section h2 { color: #a6e22e; font-size: 0.95rem; letter-spacing: 0.06em; margin-bottom: 14px; border-bottom: 1px solid #3e3d32; padding-bottom: 6px; }
+    .chart-wrap { background: #1e1f1c; border: 1px solid #3e3d32; border-radius: 6px; padding: 20px; }
+    canvas { max-height: 240px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th { color: #75715e; text-align: left; padding: 8px 12px; border-bottom: 1px solid #3e3d32; font-weight: normal; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.06em; }
+    td { padding: 9px 12px; border-bottom: 1px solid #2d2e29; }
+    tr:hover td { background: #2d2e29; }
+    .flag { color: #f92672; font-weight: bold; }
+    .ok { color: #a6e22e; }
+    .api-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 0.72rem;
+      background: #3e3d32;
+      color: #e6db74;
+    }
+    .muted { color: #75715e; }
+    #runaway-section { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Agent Cost Monitor</h1>
+    <span id="last-updated">Loading...</span>
+  </header>
+
+  <div class="container">
+    <div class="notice">
+      Free tier: 1 project. Upgrade to <strong>Pro ($19/mo)</strong> for 5 projects, alerts, and CSV export.
+      Self-hosting is always free. <a href="#pricing">See pricing.</a>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="label">Today's Spend</div>
+        <div class="value" id="today-cost">--</div>
+      </div>
+      <div class="card">
+        <div class="label">Week to Date</div>
+        <div class="value" id="week-cost">--</div>
+      </div>
+      <div class="card">
+        <div class="label">Total (30d)</div>
+        <div class="value" id="total-cost">--</div>
+      </div>
+      <div class="card alert">
+        <div class="label">Runaway Agents</div>
+        <div class="value" id="runaway-count">--</div>
+      </div>
+    </div>
+
+    <section>
+      <h2>Cost Burn (Hourly, last 48h)</h2>
+      <div class="chart-wrap">
+        <canvas id="burnChart"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Top Agents (Last 24h)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Agent ID</th>
+            <th>Requests</th>
+            <th>Cost (USD)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="agents-tbody">
+          <tr><td colspan="4" class="muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Top Models by Burn</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>API</th>
+            <th>Total Cost (USD)</th>
+          </tr>
+        </thead>
+        <tbody id="models-tbody">
+          <tr><td colspan="3" class="muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="runaway-section">
+      <h2>Runaway Agent Alerts</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Agent ID</th>
+            <th>Last-Hour Cost</th>
+            <th>Median Hourly</th>
+            <th>Ratio</th>
+          </tr>
+        </thead>
+        <tbody id="runaway-tbody"></tbody>
+      </table>
+    </section>
+
+    <section id="pricing">
+      <h2>Pricing</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="label">Free</div>
+          <div class="value" style="font-size:1.2rem; color:#a6e22e;">$0 / mo</div>
+          <p class="muted" style="font-size:0.8rem; margin-top:10px;">1 project &bull; self-host forever free &bull; community support</p>
+        </div>
+        <div class="card">
+          <div class="label">Pro</div>
+          <div class="value" style="font-size:1.2rem; color:#66d9e8;">$19 / mo</div>
+          <p class="muted" style="font-size:0.8rem; margin-top:10px;">5 projects &bull; email alerts &bull; CSV export &bull; priority support</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const byId = id => document.getElementById(id);
+    const fmt = v => '$' + (v == null ? '0.000000' : Number(v).toFixed(6));
+
+    function txt(s) {
+      return document.createTextNode(String(s == null ? '' : s));
+    }
+
+    function makeCell(content, cls) {
+      const td = document.createElement('td');
+      if (cls) td.className = cls;
+      if (typeof content === 'string' || typeof content === 'number') {
+        td.appendChild(txt(content));
+      } else if (content instanceof Node) {
+        td.appendChild(content);
+      }
+      return td;
+    }
+
+    function makeBadge(label) {
+      const span = document.createElement('span');
+      span.className = 'api-badge';
+      span.appendChild(txt(label));
+      return span;
+    }
+
+    function clearTable(tbodyId, cols, message) {
+      const tb = byId(tbodyId);
+      tb.textContent = '';
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = cols;
+      td.className = 'muted';
+      td.appendChild(txt(message));
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    }
+
+    let burnChart = null;
+
+    async function loadSummary() {
+      try {
+        const res = await fetch('/api/summary');
+        if (!res.ok) throw new Error('API error ' + res.status);
+        const d = await res.json();
+
+        byId('today-cost').textContent = fmt(d.today_cost_usd);
+        byId('week-cost').textContent = fmt(d.week_cost_usd);
+        byId('total-cost').textContent = fmt(d.total_cost_usd);
+        byId('runaway-count').textContent = d.runaway_agents.length;
+        byId('last-updated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+        // Hourly burn chart
+        const labels = d.hourly_burn.map(r => r.hour ? String(r.hour).substring(11, 16) : '');
+        const values = d.hourly_burn.map(r => r.cost_usd);
+
+        if (burnChart) {
+          burnChart.data.labels = labels;
+          burnChart.data.datasets[0].data = values;
+          burnChart.update();
+        } else {
+          const ctx = byId('burnChart').getContext('2d');
+          burnChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [{
+                label: 'Cost (USD)',
+                data: values,
+                backgroundColor: 'rgba(166,226,46,0.5)',
+                borderColor: '#a6e22e',
+                borderWidth: 1,
+              }]
+            },
+            options: {
+              responsive: true,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: '#75715e', font: { family: 'monospace' } }, grid: { color: '#3e3d32' } },
+                y: {
+                  ticks: { color: '#75715e', font: { family: 'monospace' }, callback: v => '$' + Number(v).toFixed(4) },
+                  grid: { color: '#3e3d32' }
+                }
+              }
+            }
+          });
+        }
+
+        // Agents table
+        const atb = byId('agents-tbody');
+        atb.textContent = '';
+        if (!d.top_agents.length) {
+          clearTable('agents-tbody', 4, 'No agent data yet.');
+        } else {
+          d.top_agents.forEach(a => {
+            const tr = document.createElement('tr');
+            tr.appendChild(makeCell(a.agent_id));
+            tr.appendChild(makeCell(a.requests));
+            tr.appendChild(makeCell(fmt(a.total_usd)));
+            tr.appendChild(makeCell(a.runaway ? 'RUNAWAY' : 'OK', a.runaway ? 'flag' : 'ok'));
+            atb.appendChild(tr);
+          });
+        }
+
+        // Models table
+        const mtb = byId('models-tbody');
+        mtb.textContent = '';
+        if (!d.top_models.length) {
+          clearTable('models-tbody', 3, 'No model data yet.');
+        } else {
+          d.top_models.forEach(m => {
+            const tr = document.createElement('tr');
+            tr.appendChild(makeCell(m.model));
+            tr.appendChild(makeCell(makeBadge(m.api)));
+            tr.appendChild(makeCell(fmt(m.total_usd)));
+            mtb.appendChild(tr);
+          });
+        }
+
+        // Runaway section
+        const rsec = byId('runaway-section');
+        const rtb = byId('runaway-tbody');
+        rtb.textContent = '';
+        if (d.runaway_agents.length) {
+          rsec.style.display = '';
+          d.runaway_agents.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.appendChild(makeCell(r.agent_id, 'flag'));
+            tr.appendChild(makeCell(fmt(r.hourly_cost_usd), 'flag'));
+            tr.appendChild(makeCell(fmt(r.median_hourly_usd)));
+            tr.appendChild(makeCell(r.ratio + 'x', 'flag'));
+            rtb.appendChild(tr);
+          });
+        } else {
+          rsec.style.display = 'none';
+        }
+
+      } catch (e) {
+        byId('last-updated').textContent = 'Error loading data';
+        console.error(e);
+      }
+    }
+
+    loadSummary();
+    setInterval(loadSummary, 15000);
+  </script>
+</body>
+</html>
