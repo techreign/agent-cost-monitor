@@ -328,3 +328,10 @@ def summary(
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context={})
+
+
+@app.get("/5a0d404b446c777fd0759191598a8365.txt")
+def indexnow_key():
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse("5a0d404b446c777fd0759191598a8365")
