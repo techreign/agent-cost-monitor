@@ -1,5 +1,7 @@
 # agent-cost-monitor
 
+**Live demo: https://agent-cost-monitor.fly.dev/**
+
 **Self-hosted AI agent cost monitor with cross-provider runaway detection.**
 
 Track every LLM API call across Anthropic, OpenAI, Gemini, and Groq.
